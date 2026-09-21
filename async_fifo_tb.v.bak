@@ -1,0 +1,313 @@
+`timescale 1ns/1ps
+
+module async_fifo_tb;
+
+    // ------------------------------------------------------------
+    // Parameters
+    // ------------------------------------------------------------
+    parameter DSIZE = 8;
+    parameter ASIZE = 4;
+
+    // ASIZE = 4 -> FIFO depth = 16
+    localparam DEPTH = (1 << ASIZE);
+
+
+    // ------------------------------------------------------------
+    // Testbench signals
+    // ------------------------------------------------------------
+
+    reg                  wclk;
+    reg                  rclk;
+
+    reg                  wrst_n;
+    reg                  rrst_n;
+
+    reg  [DSIZE-1:0]     wdata;
+    reg                  winc;
+    reg                  rinc;
+
+    wire [DSIZE-1:0]     rdata;
+    wire                 wfull;
+    wire                 rempty;
+
+
+    // ------------------------------------------------------------
+    // DUT
+    // ------------------------------------------------------------
+
+    async_fifo #(
+        .DSIZE(DSIZE),
+        .ASIZE(ASIZE)
+    ) DUT (
+
+        .rdata(rdata),
+
+        .wfull(wfull),
+        .rempty(rempty),
+
+        .wdata(wdata),
+        .winc(winc),
+        .wclk(wclk),
+        .wrst_n(wrst_n),
+
+        .rinc(rinc),
+        .rclk(rclk),
+        .rrst_n(rrst_n)
+    );
+
+
+    // ------------------------------------------------------------
+    // WRITE CLOCK
+    // 10 ns period
+    // ------------------------------------------------------------
+
+    initial begin
+        wclk = 1'b0;
+
+        forever
+            #5 wclk = ~wclk;
+    end
+
+
+    // ------------------------------------------------------------
+    // READ CLOCK
+    // 14 ns period
+    //
+    // Different from write clock -> asynchronous clock domains
+    // ------------------------------------------------------------
+
+    initial begin
+        rclk = 1'b0;
+
+        forever
+            #7 rclk = ~rclk;
+    end
+
+
+    // ------------------------------------------------------------
+    // Reset
+    // ------------------------------------------------------------
+
+    initial begin
+
+        wrst_n = 1'b0;
+        rrst_n = 1'b0;
+
+        wdata  = 0;
+        winc   = 1'b0;
+        rinc   = 1'b0;
+
+        // Keep reset active for a few clock cycles
+        #30;
+
+        wrst_n = 1'b1;
+        rrst_n = 1'b1;
+
+    end
+
+
+    // ------------------------------------------------------------
+    // WRITE TASK
+    // ------------------------------------------------------------
+
+    task write_fifo;
+
+        input [DSIZE-1:0] data;
+
+        begin
+
+            @(negedge wclk);
+
+            if (!wfull) begin
+
+                wdata = data;
+                winc  = 1'b1;
+
+                @(negedge wclk);
+
+                winc = 1'b0;
+
+            end
+
+            else begin
+
+                $display("FIFO FULL - write skipped at time %0t",
+                         $time);
+
+            end
+
+        end
+
+    endtask
+
+
+    // ------------------------------------------------------------
+    // READ TASK
+    // ------------------------------------------------------------
+
+    task read_fifo;
+
+        begin
+
+            @(negedge rclk);
+
+            if (!rempty) begin
+
+                rinc = 1'b1;
+
+                @(negedge rclk);
+
+                rinc = 1'b0;
+
+            end
+
+            else begin
+
+                $display("FIFO EMPTY - read skipped at time %0t",
+                         $time);
+
+            end
+
+        end
+
+    endtask
+
+
+    // ------------------------------------------------------------
+    // MAIN TEST
+    // ------------------------------------------------------------
+
+    integer i;
+
+    initial begin
+
+        // Wait for reset
+        #40;
+
+        $display("----------------------------------------");
+        $display("ASYNC FIFO TEST START");
+        $display("----------------------------------------");
+
+
+        // --------------------------------------------------------
+        // TEST 1: Write 8 values
+        // --------------------------------------------------------
+
+        $display("");
+        $display("TEST 1: Writing data...");
+
+        for (i = 0; i < 8; i = i + 1) begin
+
+            write_fifo(i + 8'hA0);
+
+            $display("WRITE : %h", i + 8'hA0);
+
+        end
+
+
+        // Give FIFO some time
+        #50;
+
+
+        // --------------------------------------------------------
+        // TEST 2: Read the 8 values
+        // --------------------------------------------------------
+
+        $display("");
+        $display("TEST 2: Reading data...");
+
+        for (i = 0; i < 8; i = i + 1) begin
+
+            read_fifo;
+
+            #1;
+
+            $display("READ  : %h", rdata);
+
+        end
+
+
+        // --------------------------------------------------------
+        // TEST 3: Fill FIFO
+        // --------------------------------------------------------
+
+        #50;
+
+        $display("");
+        $display("TEST 3: Filling FIFO...");
+
+        for (i = 0; i < DEPTH; i = i + 1) begin
+
+            write_fifo(i);
+
+            $display("WRITE : %h", i);
+
+        end
+
+
+        #50;
+
+        $display("FIFO FULL = %b", wfull);
+
+
+        // --------------------------------------------------------
+        // TEST 4: Read everything
+        // --------------------------------------------------------
+
+        $display("");
+        $display("TEST 4: Emptying FIFO...");
+
+        for (i = 0; i < DEPTH; i = i + 1) begin
+
+            read_fifo;
+
+            #1;
+
+            $display("READ : %h", rdata);
+
+        end
+
+
+        #50;
+
+        $display("FIFO EMPTY = %b", rempty);
+
+
+        // --------------------------------------------------------
+        // Finish
+        // --------------------------------------------------------
+
+        $display("");
+        $display("----------------------------------------");
+        $display("ASYNC FIFO TEST COMPLETE");
+        $display("----------------------------------------");
+
+        #50;
+
+        $finish;
+
+    end
+
+
+    // ------------------------------------------------------------
+    // Monitor
+    // ------------------------------------------------------------
+
+    initial begin
+
+        $monitor(
+            "TIME=%0t | WCLK=%b RCLK=%b | WINC=%b RINC=%b | "
+            //"W_DATA=%h R_DATA=%h | "
+            "FULL=%b EMPTY=%b",
+            $time,
+            wclk,
+            rclk,
+            winc,
+            rinc,
+            wfull,
+            rempty
+        );
+
+    end
+
+endmodule
